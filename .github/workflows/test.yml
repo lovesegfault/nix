@@ -11,7 +11,7 @@ jobs:
     env:
       CACHIX_NAME: nix-ci
     steps:
-    - uses: actions/checkout@v2.3.4
+    - uses: actions/checkout@v3.2.0
       with:
         fetch-depth: 0
     - uses: cachix/install-nix-action@v12
@@ -30,7 +30,7 @@ jobs:
     outputs:
       installerURL: ${{ steps.prepare-installer.outputs.installerURL }}
     steps:
-    - uses: actions/checkout@v2.3.4
+    - uses: actions/checkout@v3.2.0
       with:
         fetch-depth: 0
     - uses: cachix/install-nix-action@v12
@@ -50,7 +50,7 @@ jobs:
     env:
       CACHIX_NAME: nix-ci
     steps:
-    - uses: actions/checkout@v2.3.4
+    - uses: actions/checkout@v3.2.0
     - uses: cachix/install-nix-action@master
       with:
         install_url: '${{needs.installer.outputs.installerURL}}'

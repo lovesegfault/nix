@@ -11,6 +11,7 @@ config_pub_h = configure_file(
 
 headers = [ config_pub_h ] + files(
   'aws-auth.hh',
+  's3-url.hh',
   'binary-cache-store.hh',
   'build-result.hh',
   'build/derivation-builder.hh',
@@ -69,8 +70,6 @@ headers = [ config_pub_h ] + files(
   'remote-store-connection.hh',
   'remote-store.hh',
   'restricted-store.hh',
-  's3-binary-cache-store.hh',
-  's3.hh',
   'serve-protocol-connection.hh',
   'serve-protocol-impl.hh',
   'serve-protocol.hh',

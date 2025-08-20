@@ -1,7 +1,7 @@
 #include "nix/store/s3.hh"
 #include "nix/store/config.hh"
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
 
 #  include "nix/util/logging.hh"
 #  include "nix/util/finally.hh"
@@ -219,4 +219,4 @@ try {
 
 } // namespace nix
 
-#endif // NIX_WITH_AWS_CRT_SUPPORT
+#endif // NIX_WITH_S3_SUPPORT

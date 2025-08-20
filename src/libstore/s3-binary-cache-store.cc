@@ -1,3 +1,4 @@
+#include "nix/store/config.hh"
 #include "nix/store/s3-binary-cache-store.hh"
 #include "nix/store/http-binary-cache-store.hh"
 #include "nix/store/store-registration.hh"

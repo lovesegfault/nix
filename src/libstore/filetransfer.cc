@@ -9,6 +9,7 @@
 #include "nix/store/store-reference.hh"
 
 #include "store-config-private.hh"
+#include "nix/store/config.hh"
 #if NIX_WITH_S3_SUPPORT
 #  include "nix/store/s3.hh"
 #endif

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "nix/store/config.hh"
 #include "nix/store/http-binary-cache-store.hh"
 
 namespace nix {

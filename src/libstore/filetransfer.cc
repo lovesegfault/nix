@@ -9,7 +9,7 @@
 #include "nix/store/store-reference.hh"
 
 #include "store-config-private.hh"
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
 #  include "nix/store/s3.hh"
 #endif
 
@@ -77,7 +77,7 @@ struct curlFileTransfer : public FileTransfer
 
         std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
         // AWS SigV4 authentication data
         bool isS3Request = false;
         std::string awsCredentials;   // "access_key:secret_key" for CURLOPT_USERPWD
@@ -139,7 +139,7 @@ struct curlFileTransfer : public FileTransfer
                 requestHeaders = curl_slist_append(requestHeaders, fmt("%s: %s", it->first, it->second).c_str());
             }
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
             // Handle S3 URLs with curl-based AWS SigV4 authentication
             if (hasPrefix(request.uri, "s3://")) {
                 try {
@@ -402,7 +402,7 @@ struct curlFileTransfer : public FileTransfer
 
             // Use the actual URL, which may have been transformed from s3:// to https://
             std::string actualUrl = request.uri;
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
             if (isS3Request && !result.urls.empty()) {
                 actualUrl = result.urls[0];
             }
@@ -483,7 +483,7 @@ struct curlFileTransfer : public FileTransfer
             curl_easy_setopt(req, CURLOPT_ERRORBUFFER, errbuf);
             errbuf[0] = 0;
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
             // Set up AWS SigV4 authentication if this is an S3 request
             // Note: AWS SigV4 support guaranteed available (curl >= 7.75.0 checked at build time)
             if (isS3Request && !awsCredentials.empty() && !awsSigV4Provider.empty()) {
@@ -852,7 +852,7 @@ struct curlFileTransfer : public FileTransfer
     void enqueueItem(std::shared_ptr<TransferItem> item)
     {
         if (item->request.data && !hasPrefix(item->request.uri, "http://") && !hasPrefix(item->request.uri, "https://")
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
             && !hasPrefix(item->request.uri, "s3://")
 #endif
         )
@@ -869,7 +869,7 @@ struct curlFileTransfer : public FileTransfer
 #endif
     }
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
     /**
      * Convert S3 URI to HTTPS URI for use with curl's AWS SigV4 authentication
      */
@@ -913,7 +913,7 @@ struct curlFileTransfer : public FileTransfer
     {
         /* Handle s3:// URIs with curl-based AWS SigV4 authentication */
         if (hasPrefix(request.uri, "s3://")) {
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
             // Use curl-based approach with AWS SigV4 authentication
             enqueueItem(std::make_shared<TransferItem>(*this, request, std::move(callback)));
 #else

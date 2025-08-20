@@ -169,7 +169,7 @@ if aws_crt_cpp.found() and not curl_supports_aws_sigv4
 endif
 
 configdata_pub.set(
-  'NIX_WITH_AWS_CRT_SUPPORT',
+  'NIX_WITH_S3_SUPPORT',
   aws_crt_support_available.to_int(),
 )
 if aws_crt_support_available

@@ -4,7 +4,7 @@
 
 namespace nix {
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
 
 StringSet S3BinaryCacheStoreConfig::uriSchemes()
 {
@@ -43,6 +43,6 @@ ref<Store> S3BinaryCacheStoreConfig::openStore() const
 
 static RegisterStoreImplementation<S3BinaryCacheStoreConfig> registerS3BinaryCacheStore;
 
-#endif // NIX_WITH_AWS_CRT_SUPPORT
+#endif // NIX_WITH_S3_SUPPORT
 
 } // namespace nix

@@ -4,7 +4,7 @@
 
 namespace nix {
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
 
 struct S3BinaryCacheStoreConfig : HttpBinaryCacheStoreConfig
 {
@@ -62,6 +62,6 @@ struct S3BinaryCacheStoreConfig : HttpBinaryCacheStoreConfig
     ref<Store> openStore() const override;
 };
 
-#endif // NIX_WITH_AWS_CRT_SUPPORT
+#endif // NIX_WITH_S3_SUPPORT
 
 } // namespace nix

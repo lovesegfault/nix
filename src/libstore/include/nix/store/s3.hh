@@ -13,7 +13,7 @@
 #include <string>
 #include <variant>
 
-#if NIX_WITH_AWS_CRT_SUPPORT
+#if NIX_WITH_S3_SUPPORT
 
 namespace Aws {
 namespace Crt {
@@ -116,4 +116,4 @@ struct ParsedS3URL
 
 } // namespace nix
 
-#endif // NIX_WITH_AWS_CRT_SUPPORT
+#endif // NIX_WITH_S3_SUPPORT

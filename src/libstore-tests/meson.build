@@ -54,7 +54,6 @@ deps_private += gtest
 subdir('nix-meson-build-support/common')
 
 sources = files(
-  'aws-auth.cc',
   'common-protocol.cc',
   'content-address.cc',
   'derivation-advanced-attrs.cc',

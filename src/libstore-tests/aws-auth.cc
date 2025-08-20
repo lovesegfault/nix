@@ -1,4 +1,4 @@
-#include "nix/store/aws-auth.hh"
+#include "nix/store/s3.hh"
 #include "nix/store/config.hh"
 
 #if NIX_WITH_AWS_CRT_SUPPORT

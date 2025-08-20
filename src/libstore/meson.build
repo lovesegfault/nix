@@ -279,8 +279,6 @@ config_priv_h = configure_file(
 subdir('nix-meson-build-support/common')
 
 sources = files(
-  'aws-auth.cc',
-  's3-url.cc',
   'binary-cache-store.cc',
   'build-result.cc',
   'build/derivation-building-goal.cc',
@@ -340,6 +338,7 @@ sources = files(
   'remote-store.cc',
   'restricted-store.cc',
   's3-binary-cache-store.cc',
+  's3.cc',
   'serve-protocol-connection.cc',
   'serve-protocol.cc',
   'sqlite.cc',

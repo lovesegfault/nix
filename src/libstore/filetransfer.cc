@@ -10,8 +10,7 @@
 
 #include "store-config-private.hh"
 #if NIX_WITH_AWS_CRT_SUPPORT
-#  include "nix/store/aws-auth.hh"
-#  include "nix/store/s3-url.hh"
+#  include "nix/store/s3.hh"
 #endif
 
 #ifdef __linux__

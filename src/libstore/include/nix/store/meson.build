@@ -10,8 +10,7 @@ config_pub_h = configure_file(
 )
 
 headers = [ config_pub_h ] + files(
-  'aws-auth.hh',
-  's3-url.hh',
+  's3.hh',
   'binary-cache-store.hh',
   'build-result.hh',
   'build/derivation-builder.hh',

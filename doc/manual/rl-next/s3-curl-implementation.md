@@ -11,7 +11,7 @@ improvements:
 - **Reduced memory usage**: Eliminates memory buffering issues that caused
   segfaults with large files (>3.5GB)
 - **Fixed upload reliability**: Resolves AWS SDK chunking errors
-  (`InvalidChunkSizeError`) during multipart uploads
+  (`InvalidChunkSizeError`)
 - **Resolved OpenSSL conflicts**: No more S2N engine override issues in
   sandboxed builds
 - **Lighter dependencies**: Uses lightweight `aws-crt-cpp` instead of full
@@ -25,7 +25,7 @@ All existing S3 URL formats and parameters remain supported.
 ## Breaking changes
 
 The legacy `S3BinaryCacheStore` implementation has been removed in favor of the
-new curl-based approach.
+new curl-based approach, as a result multipart uploads are no longer supported. They may be reimplemented in the future.
 
 **Migration**: No action required for most users. S3 URLs continue to work
 with the same syntax. Users directly using `S3BinaryCacheStore` class

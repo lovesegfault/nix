@@ -883,10 +883,9 @@ struct curlFileTransfer : public FileTransfer
 
         ParsedURL httpsUrl;
         httpsUrl.path = "/" + parsed.bucket + "/" + parsed.key;
-        
+
         // Handle endpoint configuration
-        if (auto endpoint = parsed.endpoint; 
-            std::holds_alternative<ParsedURL>(endpoint)) {
+        if (auto endpoint = parsed.endpoint; std::holds_alternative<ParsedURL>(endpoint)) {
             // Endpoint is already a ParsedURL (e.g., http://server:9000)
             auto endpointUrl = std::get<ParsedURL>(endpoint);
             httpsUrl.scheme = endpointUrl.scheme;
@@ -902,9 +901,7 @@ struct curlFileTransfer : public FileTransfer
         } else {
             // No custom endpoint, use standard AWS S3 endpoint
             httpsUrl.scheme = scheme;
-            httpsUrl.authority = ParsedURL::Authority{
-                .host = "s3." + region + ".amazonaws.com"
-            };
+            httpsUrl.authority = ParsedURL::Authority{.host = "s3." + region + ".amazonaws.com"};
         }
 
         return {httpsUrl.to_string(), parsed};

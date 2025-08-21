@@ -80,7 +80,7 @@ struct curlFileTransfer : public FileTransfer
 
 #if NIX_WITH_S3_SUPPORT
         // AWS SigV4 authentication data
-        bool isS3Request = false;
+        std::optional<ParsedS3URL> s3Request;
         std::string awsCredentials;   // "access_key:secret_key" for CURLOPT_USERPWD
         std::string awsSigV4Provider; // Provider string for CURLOPT_AWS_SIGV4
 #endif
@@ -144,14 +144,14 @@ struct curlFileTransfer : public FileTransfer
             // Handle S3 URLs with curl-based AWS SigV4 authentication
             if (hasPrefix(request.uri, "s3://")) {
                 try {
-                    auto [httpsUri, parsed] = fileTransfer.convertS3ToHttpsUri(request.uri);
+                    auto [httpsUrl, parsed] = fileTransfer.convertS3ToHttpsUri(request.uri);
 
                     // Update the request URI to use HTTPS
-                    const_cast<FileTransferRequest &>(request).uri = httpsUri;
+                    const_cast<FileTransferRequest &>(request).uri = httpsUrl.to_string();
                     result.urls.clear();
-                    result.urls.push_back(httpsUri);
+                    result.urls.push_back(httpsUrl.to_string());
 
-                    isS3Request = true;
+                    s3Request = parsed;
 
                     // Get credentials
                     try {
@@ -172,7 +172,7 @@ struct curlFileTransfer : public FileTransfer
                                 requestHeaders, ("x-amz-security-token: " + *creds.sessionToken).c_str());
                         }
 
-                        debug("Using AWS SigV4 authentication for S3 request to %s", httpsUri.c_str());
+                        debug("Using AWS SigV4 authentication for S3 request to %s", httpsUrl.to_string().c_str());
                     } catch (const AwsAuthError & e) {
                         warn("AWS authentication failed for S3 request %s: %s", request.uri, e.what());
                         // Continue without authentication - might be a public bucket
@@ -404,7 +404,7 @@ struct curlFileTransfer : public FileTransfer
             // Use the actual URL, which may have been transformed from s3:// to https://
             std::string actualUrl = request.uri;
 #if NIX_WITH_S3_SUPPORT
-            if (isS3Request && !result.urls.empty()) {
+            if (s3Request && !result.urls.empty()) {
                 actualUrl = result.urls[0];
             }
 #endif
@@ -487,7 +487,7 @@ struct curlFileTransfer : public FileTransfer
 #if NIX_WITH_S3_SUPPORT
             // Set up AWS SigV4 authentication if this is an S3 request
             // Note: AWS SigV4 support guaranteed available (curl >= 7.75.0 checked at build time)
-            if (isS3Request && !awsCredentials.empty() && !awsSigV4Provider.empty()) {
+            if (s3Request && !awsCredentials.empty() && !awsSigV4Provider.empty()) {
                 curl_easy_setopt(req, CURLOPT_USERPWD, awsCredentials.c_str());
                 curl_easy_setopt(req, CURLOPT_AWS_SIGV4, awsSigV4Provider.c_str());
                 debug("Configured curl with AWS SigV4 authentication: provider=%s", awsSigV4Provider);
@@ -874,7 +874,7 @@ struct curlFileTransfer : public FileTransfer
     /**
      * Convert S3 URI to HTTPS URI for use with curl's AWS SigV4 authentication
      */
-    std::pair<std::string, ParsedS3URL> convertS3ToHttpsUri(const std::string & s3Uri)
+    std::pair<ParsedURL, ParsedS3URL> convertS3ToHttpsUri(const std::string & s3Uri)
     {
         auto parsed = ParsedS3URL::parse(s3Uri);
 
@@ -904,7 +904,7 @@ struct curlFileTransfer : public FileTransfer
             httpsUrl.authority = ParsedURL::Authority{.host = "s3." + region + ".amazonaws.com"};
         }
 
-        return {httpsUrl.to_string(), parsed};
+        return {httpsUrl, parsed};
     }
 #endif
     void enqueueFileTransfer(const FileTransferRequest & request, Callback<FileTransferResult> callback) override
@@ -915,9 +915,10 @@ struct curlFileTransfer : public FileTransfer
             // Use curl-based approach with AWS SigV4 authentication
             enqueueItem(std::make_shared<TransferItem>(*this, request, std::move(callback)));
 #else
-            throw nix::Error(
-                "cannot download '%s' because Nix is not built with AWS CRT support (requires aws-crt-cpp and curl >= 7.75.0)",
-                request.uri);
+            callback.throw_(
+                nix::Error(
+                    "cannot download '%s' because Nix is not built with AWS CRT support (requires aws-crt-cpp and curl >= 7.75.0)",
+                    request.uri));
 #endif
             return;
         }

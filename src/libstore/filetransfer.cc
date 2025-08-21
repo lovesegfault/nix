@@ -144,7 +144,8 @@ struct curlFileTransfer : public FileTransfer
             // Handle S3 URLs with curl-based AWS SigV4 authentication
             if (hasPrefix(request.uri, "s3://")) {
                 try {
-                    auto [httpsUrl, parsed] = fileTransfer.convertS3ToHttpsUri(request.uri);
+                    auto parsed = ParsedS3URL::parse(request.uri);
+                    auto httpsUrl = fileTransfer.s3ToHttpsUrl(parsed);
 
                     // Update the request URI to use HTTPS
                     const_cast<FileTransferRequest &>(request).uri = httpsUrl.to_string();
@@ -872,12 +873,10 @@ struct curlFileTransfer : public FileTransfer
 
 #if NIX_WITH_S3_SUPPORT
     /**
-     * Convert S3 URI to HTTPS URI for use with curl's AWS SigV4 authentication
+     * Convert ParsedS3URL to HTTPS ParsedURL for use with curl's AWS SigV4 authentication
      */
-    std::pair<ParsedURL, ParsedS3URL> convertS3ToHttpsUri(const std::string & s3Uri)
+    ParsedURL s3ToHttpsUrl(const ParsedS3URL & parsed)
     {
-        auto parsed = ParsedS3URL::parse(s3Uri);
-
         std::string region = parsed.region.value_or("us-east-1");
         std::string scheme = parsed.scheme.value_or("https");
 
@@ -904,7 +903,7 @@ struct curlFileTransfer : public FileTransfer
             httpsUrl.authority = ParsedURL::Authority{.host = "s3." + region + ".amazonaws.com"};
         }
 
-        return {httpsUrl, parsed};
+        return httpsUrl;
     }
 #endif
     void enqueueFileTransfer(const FileTransferRequest & request, Callback<FileTransferResult> callback) override

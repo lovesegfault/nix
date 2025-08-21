@@ -214,7 +214,8 @@ try {
         }(),
     };
 } catch (BadURL & e) {
-    throw BadURL("while parsing S3 URL '%s': %s", uri, e.what());
+    e.addTrace({}, "while parsing S3 URI: '%s'", uri);
+    throw;
 }
 
 } // namespace nix

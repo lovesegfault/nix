@@ -4,6 +4,10 @@
 #include "nix/store/nar-info-disk-cache.hh"
 #include "nix/util/callback.hh"
 #include "nix/store/store-registration.hh"
+#if NIX_WITH_S3_SUPPORT
+#  include "nix/store/s3.hh"
+#  include "nix/store/s3-binary-cache-store.hh"
+#endif
 
 namespace nix {
 
@@ -15,7 +19,7 @@ StringSet HttpBinaryCacheStoreConfig::uriSchemes()
     auto ret = StringSet{"http", "https"};
     if (forceHttp)
         ret.insert("file");
-    // S3 is now handled by S3BinaryCacheStoreConfig
+    // S3 URLs are handled by S3BinaryCacheStoreConfig
     return ret;
 }
 
@@ -23,10 +27,25 @@ HttpBinaryCacheStoreConfig::HttpBinaryCacheStoreConfig(
     std::string_view scheme, std::string_view _cacheUri, const Params & params)
     : StoreConfig(params)
     , BinaryCacheStoreConfig(params)
-    , cacheUri(parseURL(
-          std::string{scheme} + "://"
-          + (!_cacheUri.empty() ? _cacheUri
-                                : throw UsageError("`%s` Store requires a non-empty authority in Store URL", scheme))))
+    , cacheUri([&]() -> ParsedURL {
+#if NIX_WITH_S3_SUPPORT
+        // Handle S3 URLs specially - convert to HTTPS for actual requests
+        if (scheme == "s3") {
+            // Parse the S3 URL to extract bucket and get endpoint/region info
+            std::string s3Uri = std::string{scheme} + "://" + std::string{_cacheUri};
+            auto parsed = ParsedS3URL::parse(s3Uri);
+
+            // For S3, we store the original s3:// URL but will convert to HTTPS for requests
+            // This preserves the original URL for display and reference purposes
+            return parseURL(s3Uri);
+        }
+#endif
+        return parseURL(
+            std::string{scheme} + "://"
+            + (!_cacheUri.empty()
+                   ? _cacheUri
+                   : throw UsageError("`%s` Store requires a non-empty authority in Store URL", scheme)));
+    }())
 {
     while (!cacheUri.path.empty() && cacheUri.path.back() == '/')
         cacheUri.path.pop_back();
@@ -175,6 +194,33 @@ protected:
         } else {
             // Properly handle paths with query parameters
             auto resultUrl = config->cacheUri;
+
+#if NIX_WITH_S3_SUPPORT
+            // For S3 URLs, construct a proper S3 URL and let FileTransfer handle the conversion
+            if (resultUrl.scheme == "s3") {
+                // Simple approach: just append the path to the S3 URL
+                // FileTransfer's convertS3ToHttpsUri will handle the actual URL construction
+                ParsedURL s3Url = resultUrl;
+
+                // For S3, paths represent object keys within the bucket
+                // The bucket name is in the authority, not the path
+                if (!resultUrl.path.empty() && resultUrl.path != "/") {
+                    // If there's a base path (prefix), append to it
+                    s3Url.path = resultUrl.path;
+                    if (s3Url.path.back() != '/')
+                        s3Url.path += '/';
+                    s3Url.path += path;
+                } else {
+                    // No base path, just use the requested path
+                    s3Url.path = "/" + path;
+                }
+
+                // Query parameters are preserved from the base URL
+                // (endpoint, region, profile, etc.)
+
+                return FileTransferRequest(s3Url.to_string());
+            }
+#endif
 
             // Parse the path to separate the actual path from query parameters
             auto questionPos = path.find('?');

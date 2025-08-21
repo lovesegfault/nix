@@ -7,6 +7,9 @@ namespace nix {
 
 #if NIX_WITH_S3_SUPPORT
 
+// S3BinaryCacheStoreConfig is now just a configuration class
+// The actual store implementation is handled by HttpBinaryCacheStore
+
 StringSet S3BinaryCacheStoreConfig::uriSchemes()
 {
     return {"s3"};
@@ -31,14 +34,14 @@ std::string S3BinaryCacheStoreConfig::doc()
 
         This store allows reading and writing a binary cache stored in an AWS S3 bucket.
 
-        This new implementation uses libcurl with AWS SigV4 authentication instead of the
+        This implementation uses libcurl with AWS SigV4 authentication instead of the
         AWS SDK, providing a lighter and more reliable solution.
     )";
 }
 
 ref<Store> S3BinaryCacheStoreConfig::openStore() const
 {
-    // Reuse the HttpBinaryCacheStore implementation which now handles S3
+    // Create an HttpBinaryCacheStore with S3-specific configuration
     return HttpBinaryCacheStoreConfig::openStore();
 }
 

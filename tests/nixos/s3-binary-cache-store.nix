@@ -101,6 +101,7 @@ in
 
       # Use a unique name to avoid cache hits
       import random
+      import re
       derivation_test = f"""
         derivation {{
           name = "s3-fork-test-{random.randint(0, 100)}";
@@ -124,15 +125,36 @@ in
       else:
         print("SUCCESS: Found evidence of FileTransfer creation in forked process")
 
-      if "[pid=" not in derivation_output or "creating new AWS credential provider" not in derivation_output:
+      # Check for pre-resolution of credentials in parent process
+      if "Pre-resolving AWS credentials for S3 URL" not in derivation_output:
         print("Debug output:")
         print(derivation_output)
-        raise Exception("FAILED: Expected to find PID tracking and credential provider creation in debug output")
+        raise Exception("FAILED: Expected to find 'Pre-resolving AWS credentials for S3 URL' in debug output")
       else:
-        print("SUCCESS: Found evidence of credential provider creation with PID tracking")
+        print("SUCCESS: Found evidence of credential pre-resolution in parent process")
 
-      # Test multiple sequential derivations to check if credential providers are recreated
+      # Check that credentials are used in child process
+      if "[pid=1] Using pre-resolved AWS credentials from parent process" not in derivation_output:
+        print("Debug output:")
+        print(derivation_output)
+        raise Exception("FAILED: Expected to find '[pid=1] Using pre-resolved AWS credentials from parent process' in debug output")
+      else:
+        print("SUCCESS: Found evidence of pre-resolved credentials being used in child process")
+
+      # Check that NO credential provider is created in the forked child (pid=1)
+      child_provider_creation = re.findall(r'\[pid=1\].*creating new AWS credential provider', derivation_output)
+      if child_provider_creation:
+        print("Debug output:")
+        print(derivation_output)
+        raise Exception(f"FAILED: Child process (pid=1) should NOT create credential providers, but found: {child_provider_creation}")
+      else:
+        print("SUCCESS: Child process correctly reused pre-resolved credentials without creating new providers")
+
+      # Test multiple sequential derivations to check credential provider behavior
       sequential_providers_found = 0
+      parent_providers_created = 0
+      child_providers_created = 0
+
       for i in range(3):
         test_expr = f"""
           derivation {{
@@ -154,14 +176,36 @@ in
           sequential_providers_found += 1
           print(f"Derivation {i}: Found FileTransfer creation in forked process")
 
-        if "[pid=" in result:
-          pids = [line for line in result.split('\\n') if 'creating new AWS credential provider' in line]
-          if pids:
-            print(f"Derivation {i}: Found credential provider creation: {pids[0]}")
+        # Check for pre-resolution in parent
+        if "Pre-resolving AWS credentials for S3 URL" in result:
+          print(f"Derivation {i}: Parent pre-resolved credentials")
+
+        # Check if child used pre-resolved credentials
+        if "[pid=1] Using pre-resolved AWS credentials from parent process" in result:
+          print(f"Derivation {i}: Child used pre-resolved credentials")
+
+        # Count credential provider creations
+        parent_creations = re.findall(r'\[pid=(?!1\])[^\]]*\].*creating new AWS credential provider', result)
+        if parent_creations:
+          parent_providers_created += len(parent_creations)
+          print(f"Derivation {i}: Parent created {len(parent_creations)} credential provider(s)")
+
+        child_creations = re.findall(r'\[pid=1\].*creating new AWS credential provider', result)
+        if child_creations:
+          child_providers_created += len(child_creations)
+          print(f"Derivation {i}: ERROR - Child created credential provider (should use pre-resolved)")
 
       # Each derivation should create its own FileTransfer in a forked process
       if sequential_providers_found != 3:
         raise Exception(f"FAILED: Expected 3 FileTransfer creations in sequential derivations, but found {sequential_providers_found}")
+
+      # No child process should create credential providers
+      if child_providers_created > 0:
+        raise Exception(f"FAILED: Child processes should NOT create credential providers, but {child_providers_created} were created")
+      else:
+        print("SUCCESS: No credential providers created in child processes (correct behavior)")
+
+      print(f"Total parent credential providers created: {parent_providers_created}")
 
       # Copy a package from the binary cache.
       client.fail("nix path-info ${pkgA}")

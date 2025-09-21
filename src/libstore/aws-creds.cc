@@ -26,52 +26,41 @@ namespace nix {
 namespace {
 
 // AWS CRT initialization
-static bool initAwsCrt()
+static void initAwsCrt()
 {
-    static bool initialized = []() {
-        try {
-            // Use a static local variable instead of global to control destruction order
-            struct CrtWrapper
-            {
-                Aws::Crt::ApiHandle apiHandle;
-                CrtWrapper()
-                {
-                    apiHandle.InitializeLogging(Aws::Crt::LogLevel::Warn, (FILE *) nullptr);
-                }
-                ~CrtWrapper()
-                {
-                    try {
-                        // CRITICAL: Clear credential provider cache BEFORE AWS CRT shuts down
-                        // This ensures all providers (which hold references to ClientBootstrap)
-                        // are destroyed while AWS CRT is still valid
-                        clearAwsCredentialsCache();
-                        // Now it's safe for ApiHandle destructor to run
-                    } catch (...) {
-                        ignoreExceptionInDestructor();
-                    }
-                }
-            };
-            static CrtWrapper crt;
-            return true;
-        } catch (const std::exception & e) {
-            debug("Failed to initialize AWS CRT: %s", e.what());
-            return false;
-        } catch (...) {
-            debug("Failed to initialize AWS CRT: unknown error");
-            return false;
+    // Use a static local variable instead of global to control destruction order
+    struct CrtWrapper
+    {
+        Aws::Crt::ApiHandle apiHandle;
+
+        CrtWrapper()
+        {
+            apiHandle.InitializeLogging(Aws::Crt::LogLevel::Warn, (FILE *) nullptr);
         }
-    }();
-    return initialized;
+
+        ~CrtWrapper()
+        {
+            try {
+                // CRITICAL: Clear credential provider cache BEFORE AWS CRT shuts down
+                // This ensures all providers (which hold references to ClientBootstrap)
+                // are destroyed while AWS CRT is still valid
+                clearAwsCredentialsCache();
+                // Now it's safe for ApiHandle destructor to run
+            } catch (...) {
+                ignoreExceptionInDestructor();
+            }
+        }
+    };
+
+    static CrtWrapper crt;
 }
 
 // Free functions for creating and using credential providers
 static std::shared_ptr<Aws::Crt::Auth::ICredentialsProvider> createDefaultProvider()
 {
-    if (!initAwsCrt()) {
-        throw AwsAuthError("AWS CRT not initialized, cannot create credential provider");
-    }
-
     try {
+        initAwsCrt();
+
         Aws::Crt::Auth::CredentialsProviderChainDefaultConfig config;
         config.Bootstrap = Aws::Crt::ApiHandle::GetOrCreateStaticDefaultClientBootstrap();
 
@@ -81,26 +70,21 @@ static std::shared_ptr<Aws::Crt::Auth::ICredentialsProvider> createDefaultProvid
         }
 
         return provider;
-    } catch (const AwsAuthError &) {
+    } catch (Error & e) {
+        e.addTrace({}, "while creating default AWS credentials provider");
         throw;
-    } catch (const std::exception & e) {
-        throw AwsAuthError("Exception creating AWS credential provider: %s", e.what());
-    } catch (...) {
-        throw AwsAuthError("Unknown exception creating AWS credential provider");
     }
 }
 
 static std::shared_ptr<Aws::Crt::Auth::ICredentialsProvider> createProfileProvider(const std::string & profile)
 {
-    if (!initAwsCrt()) {
-        throw AwsAuthError("AWS CRT not initialized, cannot create credential provider");
-    }
-
     if (profile.empty()) {
         return createDefaultProvider();
     }
 
     try {
+        initAwsCrt();
+
         Aws::Crt::Auth::CredentialsProviderProfileConfig config;
         config.Bootstrap = Aws::Crt::ApiHandle::GetOrCreateStaticDefaultClientBootstrap();
         config.ProfileNameOverride = Aws::Crt::ByteCursorFromCString(profile.c_str());
@@ -111,12 +95,9 @@ static std::shared_ptr<Aws::Crt::Auth::ICredentialsProvider> createProfileProvid
         }
 
         return provider;
-    } catch (const AwsAuthError &) {
+    } catch (Error & e) {
+        e.addTrace({}, "while creating AWS credentials provider for profile '%s'", profile);
         throw;
-    } catch (const std::exception & e) {
-        throw AwsAuthError("Exception creating AWS credential provider for profile '%s': %s", profile, e.what());
-    } catch (...) {
-        throw AwsAuthError("Unknown exception creating AWS credential provider for profile '%s'", profile);
     }
 }
 

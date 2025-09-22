@@ -275,8 +275,10 @@ struct ChrootLinuxDerivationBuilder : ChrootDerivationBuilder, LinuxDerivationBu
 
     void startChild() override
     {
+#  if NIX_WITH_S3_SUPPORT
         // Pre-resolve AWS credentials before forking
         preResolveAwsCredentials();
+#  endif
 
         /* Set up private namespaces for the build:
 

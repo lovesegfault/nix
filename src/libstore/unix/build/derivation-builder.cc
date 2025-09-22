@@ -194,7 +194,6 @@ protected:
      * Resolved in parent process before fork to avoid credential provider recreation.
      */
     std::optional<AwsCredentialsForBuilder> preResolvedAwsCredentials;
-#endif
 
 protected:
     /**
@@ -203,7 +202,6 @@ protected:
      */
     void preResolveAwsCredentials()
     {
-#if NIX_WITH_S3_SUPPORT
         if (drv.isBuiltin() && drv.builder == "builtin:fetchurl") {
             auto url = drv.env.find("url");
             if (url != drv.env.end()) {
@@ -230,8 +228,8 @@ protected:
                 }
             }
         }
-#endif
     }
+#endif
 
     const StorePathSet & originalPaths() override
     {
@@ -993,8 +991,10 @@ void DerivationBuilderImpl::openSlave()
 
 void DerivationBuilderImpl::startChild()
 {
+#if NIX_WITH_S3_SUPPORT
     // Pre-resolve AWS credentials before forking
     preResolveAwsCredentials();
+#endif
 
     pid = startProcess([&]() {
         openSlave();

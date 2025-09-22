@@ -25,10 +25,8 @@ namespace nix {
 
 namespace {
 
-// AWS CRT initialization
 static void initAwsCrt()
 {
-    // Use a static local variable instead of global to control destruction order
     struct CrtWrapper
     {
         Aws::Crt::ApiHandle apiHandle;
@@ -53,52 +51,6 @@ static void initAwsCrt()
     };
 
     static CrtWrapper crt;
-}
-
-// Free functions for creating and using credential providers
-static std::shared_ptr<Aws::Crt::Auth::ICredentialsProvider> createDefaultProvider()
-{
-    try {
-        initAwsCrt();
-
-        Aws::Crt::Auth::CredentialsProviderChainDefaultConfig config;
-        config.Bootstrap = Aws::Crt::ApiHandle::GetOrCreateStaticDefaultClientBootstrap();
-
-        auto provider = Aws::Crt::Auth::CredentialsProvider::CreateCredentialsProviderChainDefault(config);
-        if (!provider) {
-            throw AwsAuthError("Failed to create default AWS credentials provider");
-        }
-
-        return provider;
-    } catch (Error & e) {
-        e.addTrace({}, "while creating default AWS credentials provider");
-        throw;
-    }
-}
-
-static std::shared_ptr<Aws::Crt::Auth::ICredentialsProvider> createProfileProvider(const std::string & profile)
-{
-    if (profile.empty()) {
-        return createDefaultProvider();
-    }
-
-    try {
-        initAwsCrt();
-
-        Aws::Crt::Auth::CredentialsProviderProfileConfig config;
-        config.Bootstrap = Aws::Crt::ApiHandle::GetOrCreateStaticDefaultClientBootstrap();
-        config.ProfileNameOverride = Aws::Crt::ByteCursorFromCString(profile.c_str());
-
-        auto provider = Aws::Crt::Auth::CredentialsProvider::CreateCredentialsProviderProfile(config);
-        if (!provider) {
-            throw AwsAuthError("Failed to create AWS credentials provider for profile '%s'", profile);
-        }
-
-        return provider;
-    } catch (Error & e) {
-        e.addTrace({}, "while creating AWS credentials provider for profile '%s'", profile);
-        throw;
-    }
 }
 
 static AwsCredentials getCredentialsFromProvider(std::shared_ptr<Aws::Crt::Auth::ICredentialsProvider> provider)
@@ -196,7 +148,32 @@ AwsCredentials getAwsCredentials(const std::string & profile)
             getpid(),
             profile.empty() ? "(default)" : profile.c_str());
 
-        provider = profile.empty() ? createDefaultProvider() : createProfileProvider(profile);
+        try {
+            initAwsCrt();
+
+            if (profile.empty()) {
+                Aws::Crt::Auth::CredentialsProviderChainDefaultConfig config;
+                config.Bootstrap = Aws::Crt::ApiHandle::GetOrCreateStaticDefaultClientBootstrap();
+                provider = Aws::Crt::Auth::CredentialsProvider::CreateCredentialsProviderChainDefault(config);
+            } else {
+                Aws::Crt::Auth::CredentialsProviderProfileConfig config;
+                config.Bootstrap = Aws::Crt::ApiHandle::GetOrCreateStaticDefaultClientBootstrap();
+                config.ProfileNameOverride = Aws::Crt::ByteCursorFromCString(profile.c_str());
+                provider = Aws::Crt::Auth::CredentialsProvider::CreateCredentialsProviderProfile(config);
+            }
+        } catch (Error & e) {
+            e.addTrace(
+                {},
+                "while creating AWS credentials provider for %s",
+                profile.empty() ? "default profile" : fmt("profile '%s'", profile));
+            throw;
+        }
+
+        if (!provider) {
+            throw AwsAuthError(
+                "Failed to create AWS credentials provider for %s",
+                profile.empty() ? "default profile" : fmt("profile '%s'", profile));
+        }
 
         // Insert into cache (try_emplace is thread-safe and won't overwrite if another thread added it)
         credentialProviderCache.try_emplace(profile, provider);
@@ -232,7 +209,7 @@ std::optional<AwsCredentials> preResolveAwsCredentials(const std::string & url)
         debug("Failed to pre-resolve AWS credentials: %s", e.what());
         return std::nullopt;
     } catch (const std::exception & e) {
-        debug("Error pre-resolving AWS credentials: %s", e.what());
+        debug("Failed to pre-resolve AWS credentials: %s", e.what());
         return std::nullopt;
     }
 }

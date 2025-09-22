@@ -39,10 +39,6 @@ TEST(S3BinaryCacheStore, defaultSettings)
     EXPECT_EQ(config.endpoint.get(), "");
 }
 
-// =============================================================================
-// S3BinaryCacheStore Integration Tests
-// =============================================================================
-
 /**
  * Test that S3BinaryCacheStore properly preserves S3-specific parameters
  */
@@ -74,10 +70,6 @@ TEST(S3BinaryCacheStore, s3SchemeRegistration)
     auto httpSchemes = HttpBinaryCacheStoreConfig::uriSchemes();
     EXPECT_FALSE(httpSchemes.count("s3") > 0) << "HTTP store shouldn't directly list S3 scheme";
 }
-
-// =============================================================================
-// FileTransferRequest Tests (moved from s3-url.cc)
-// =============================================================================
 
 /**
  * Test that S3 upload requests are properly configured

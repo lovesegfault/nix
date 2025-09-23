@@ -11,6 +11,7 @@
 
 #include "store-config-private.hh"
 #include "nix/store/config.hh"
+#include <string>
 #if NIX_WITH_S3_SUPPORT
 #  include "nix/store/aws-creds.hh"
 #  include "nix/store/s3-url.hh"
@@ -42,6 +43,72 @@ const unsigned int RETRY_TIME_MS_TOO_MANY_REQUESTS = 60000;
 FileTransferSettings fileTransferSettings;
 
 static GlobalConfig::Register rFileTransferSettings(&fileTransferSettings);
+
+struct S3Request
+{
+    FileTransferRequest request;
+    std::string awsCredentials;
+    std::string awsSigV4Provider;
+};
+
+static S3Request setupRequestForS3(FileTransferRequest request)
+{
+    if (request.uri.scheme() != "s3") {
+        return S3Request{std::move(request)};
+    }
+#if !NIX_WITH_S3_SUPPORT
+    throw nix::Error(
+        "cannot download '%s' because Nix is not built with AWS CRT support (requires aws-crt-cpp and curl >= 7.75.0)",
+        request.uri.to_string());
+#else
+    auto parsedS3 = ParsedS3URL::parse(request.uri.parsed());
+    auto httpsUrl = parsedS3.toHttpsUrl();
+
+    // Update the request URI to use HTTPS (modifying our member copy)
+    request.uri = httpsUrl;
+
+    // Get credentials
+    try {
+        // Check if pre-resolved credentials are available
+        std::optional<AwsCredentials> credsOpt;
+        if (request.preResolvedAwsCredentials) {
+            debug("Using pre-resolved AWS credentials from parent process");
+            credsOpt = request.preResolvedAwsCredentials;
+        } else {
+            std::string profile = parsedS3.profile.value_or("");
+
+            // Get credentials (automatically cached)
+            credsOpt = getAwsCredentials(profile);
+        }
+
+        auto awsCredentials = std::string();
+        auto awsSigV4Provider = std::string();
+        if (credsOpt) {
+            auto & creds = *credsOpt;
+            awsCredentials = creds.accessKeyId + ":" + creds.secretAccessKey;
+
+            std::string region = parsedS3.region.value_or("us-east-1");
+            std::string service = "s3";
+            awsSigV4Provider = "aws:amz:" + region + ":" + service;
+
+            // Add session token header if present
+            if (creds.sessionToken) {
+                request.headers.emplace_back("x-amz-security-token", *creds.sessionToken);
+            }
+        }
+        return S3Request{std::move(request), awsCredentials, awsSigV4Provider};
+    } catch (const AwsAuthError & e) {
+        warn("AWS authentication failed for S3 request %s: %s", request.uri, e.what());
+
+        // Invalidate the cached credentials so next request will retry
+        std::string profile = parsedS3.profile.value_or("");
+        invalidateAwsCredentials(profile);
+
+        // Continue without authentication - might be a public bucket
+        return S3Request{std::move(request)};
+    }
+#endif
+}
 
 struct curlFileTransfer : public FileTransfer
 {
@@ -419,11 +486,6 @@ struct curlFileTransfer : public FileTransfer
 
             // Use the actual URL, which may have been transformed from s3:// to https://
             std::string actualUrl = request.uri.to_string();
-#if NIX_WITH_S3_SUPPORT
-            if (s3Request && !result.urls.empty()) {
-                actualUrl = result.urls[0];
-            }
-#endif
             curl_easy_setopt(req, CURLOPT_URL, actualUrl.c_str());
             curl_easy_setopt(req, CURLOPT_FOLLOWLOCATION, 1L);
             curl_easy_setopt(req, CURLOPT_MAXREDIRS, 10);
@@ -893,17 +955,6 @@ struct curlFileTransfer : public FileTransfer
 
     void enqueueFileTransfer(const FileTransferRequest & request, Callback<FileTransferResult> callback) override
     {
-#if !NIX_WITH_S3_SUPPORT
-        /* Handle s3:// URIs with curl-based AWS SigV4 authentication */
-        if (request.uri.scheme() == "s3") {
-            callback.rethrow(
-                std::make_exception_ptr(
-                    nix::Error(
-                        "cannot download '%s' because Nix is not built with AWS CRT support (requires aws-crt-cpp and curl >= 7.75.0)",
-                        request.uri.to_string())));
-        }
-#endif
-
         enqueueItem(std::make_shared<TransferItem>(*this, request, std::move(callback)));
     }
 };

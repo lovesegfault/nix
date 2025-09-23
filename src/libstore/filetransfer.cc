@@ -3,6 +3,7 @@
 #include "nix/util/config-global.hh"
 #include "nix/store/store-api.hh"
 #include "nix/util/compression.hh"
+#include "nix/util/error.hh"
 #include "nix/util/finally.hh"
 #include "nix/util/callback.hh"
 #include "nix/util/signals.hh"
@@ -12,6 +13,7 @@
 #include "store-config-private.hh"
 #include "nix/store/config.hh"
 #include <string>
+#include <utility>
 #if NIX_WITH_S3_SUPPORT
 #  include "nix/store/aws-creds.hh"
 #  include "nix/store/s3-url.hh"
@@ -54,7 +56,7 @@ struct S3Request
 static S3Request setupRequestForS3(FileTransferRequest request)
 {
     if (request.uri.scheme() != "s3") {
-        return S3Request{std::move(request)};
+        nix::unreachable();
     }
 #if !NIX_WITH_S3_SUPPORT
     throw nix::Error(
@@ -168,6 +170,14 @@ struct curlFileTransfer : public FileTransfer
         }
 
         TransferItem(
+            curlFileTransfer & fileTransfer, const S3Request & request, Callback<FileTransferResult> && callback)
+            : TransferItem(fileTransfer, request.request, std::move(callback))
+        {
+            awsCredentials = request.awsCredentials;
+            awsSigV4Provider = request.awsSigV4Provider;
+        }
+
+        TransferItem(
             curlFileTransfer & fileTransfer,
             const FileTransferRequest & request,
             Callback<FileTransferResult> && callback)
@@ -208,63 +218,6 @@ struct curlFileTransfer : public FileTransfer
             for (auto it = request.headers.begin(); it != request.headers.end(); ++it) {
                 requestHeaders = curl_slist_append(requestHeaders, fmt("%s: %s", it->first, it->second).c_str());
             }
-
-#if NIX_WITH_S3_SUPPORT
-            // Handle S3 URLs with curl-based AWS SigV4 authentication
-            if (request.uri.scheme() == "s3") {
-                try {
-                    auto parsed = ParsedS3URL::parse(request.uri.parsed());
-                    auto httpsUrl = parsed.toHttpsUrl();
-
-                    // Update the request URI to use HTTPS (modifying our member copy)
-                    this->request.uri = httpsUrl;
-                    result.urls.clear();
-                    result.urls.push_back(httpsUrl.to_string());
-
-                    s3Request = parsed;
-
-                    // Get credentials
-                    try {
-                        // Check if pre-resolved credentials are available
-                        std::optional<AwsCredentials> credsOpt;
-                        if (request.preResolvedAwsCredentials) {
-                            debug("Using pre-resolved AWS credentials from parent process");
-                            credsOpt = request.preResolvedAwsCredentials;
-                        } else {
-                            std::string profile = parsed.profile.value_or("");
-
-                            // Get credentials (automatically cached)
-                            credsOpt = getAwsCredentials(profile);
-                        }
-
-                        if (credsOpt) {
-                            auto & creds = *credsOpt;
-                            awsCredentials = creds.accessKeyId + ":" + creds.secretAccessKey;
-
-                            std::string region = parsed.region.value_or("us-east-1");
-                            std::string service = "s3";
-                            awsSigV4Provider = "aws:amz:" + region + ":" + service;
-
-                            // Add session token header if present
-                            if (creds.sessionToken) {
-                                requestHeaders = curl_slist_append(
-                                    requestHeaders, ("x-amz-security-token: " + *creds.sessionToken).c_str());
-                            }
-                        }
-                    } catch (const AwsAuthError & e) {
-                        warn("AWS authentication failed for S3 request %s: %s", request.uri, e.what());
-
-                        // Invalidate the cached credentials so next request will retry
-                        std::string profile = parsed.profile.value_or("");
-                        invalidateAwsCredentials(profile);
-
-                        // Continue without authentication - might be a public bucket
-                    }
-                } catch (std::exception & e) {
-                    warn("Failed to set up AWS SigV4 authentication for S3 request %s: %s", request.uri, e.what());
-                }
-            }
-#endif
         }
 
         ~TransferItem()
@@ -955,7 +908,11 @@ struct curlFileTransfer : public FileTransfer
 
     void enqueueFileTransfer(const FileTransferRequest & request, Callback<FileTransferResult> callback) override
     {
-        enqueueItem(std::make_shared<TransferItem>(*this, request, std::move(callback)));
+        if (request.uri.scheme() == "s3") {
+            enqueueItem(std::make_shared<TransferItem>(*this, setupRequestForS3(request), std::move(callback)));
+        } else {
+            enqueueItem(std::make_shared<TransferItem>(*this, request, std::move(callback)));
+        }
     }
 };
 

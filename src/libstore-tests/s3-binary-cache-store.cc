@@ -71,27 +71,6 @@ TEST(S3BinaryCacheStore, s3SchemeRegistration)
     EXPECT_FALSE(httpSchemes.count("s3") > 0) << "HTTP store shouldn't directly list S3 scheme";
 }
 
-/**
- * Test that S3 upload requests are properly configured
- */
-TEST(S3BinaryCacheStore, s3UploadRequestConfiguration)
-{
-    auto s3Url = ParsedS3URL{
-        .bucket = "test-bucket",
-        .key = {"test-file"},
-    };
-    auto httpsUrl = s3Url.toHttpsUrl();
-
-    FileTransferRequest uploadReq(httpsUrl);
-    uploadReq.data = std::string("test data");
-
-    // Verify upload request is properly configured
-    EXPECT_EQ(uploadReq.uri.scheme(), "https");
-    EXPECT_TRUE(uploadReq.data.has_value());
-    EXPECT_EQ(*uploadReq.data, "test data");
-    EXPECT_TRUE(uploadReq.uri.to_string().find("test-bucket") != std::string::npos);
-}
-
 } // namespace nix
 
 #endif

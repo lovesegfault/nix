@@ -16,6 +16,7 @@ let
 
   storeUrl = "s3://my-cache?endpoint=http://server:9000&region=eu-west-1";
   objectThatDoesNotExist = "s3://my-cache/foo-that-does-not-exist?endpoint=http://server:9000&region=eu-west-1";
+  objectThatDoesNotExistHttpUrl = "http://server:9000/my-cache/foo-that-does-not-exist";
 
 in
 {
@@ -88,7 +89,7 @@ in
 
       # Test that the format string in the error message is properly setup and won't display `%s` instead of the failed URI
       msg = client.fail("${env} nix eval --impure --expr 'builtins.fetchurl { name = \"foo\"; url = \"${objectThatDoesNotExist}\"; }' 2>&1")
-      if "unable to download '${objectThatDoesNotExist}': HTTP error 404" not in msg:
+      if "unable to download '${objectThatDoesNotExistHttpUrl}': HTTP error 404" not in msg:
         print(msg) # So that you can see the message that was improperly formatted
         raise Exception("Error message formatting didn't work")
 

@@ -150,8 +150,6 @@ struct curlFileTransfer : public FileTransfer
         std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
 
 #if NIX_WITH_S3_SUPPORT
-        // AWS SigV4 authentication data
-        std::optional<ParsedS3URL> s3Request;
         std::string awsCredentials;   // "access_key:secret_key" for CURLOPT_USERPWD
         std::string awsSigV4Provider; // Provider string for CURLOPT_AWS_SIGV4
 #endif
@@ -518,7 +516,7 @@ struct curlFileTransfer : public FileTransfer
 #if NIX_WITH_S3_SUPPORT
             // Set up AWS SigV4 authentication if this is an S3 request
             // Note: AWS SigV4 support guaranteed available (curl >= 7.75.0 checked at build time)
-            if (s3Request && !awsCredentials.empty() && !awsSigV4Provider.empty()) {
+            if (!awsCredentials.empty() && !awsSigV4Provider.empty()) {
                 curl_easy_setopt(req, CURLOPT_USERPWD, awsCredentials.c_str());
                 curl_easy_setopt(req, CURLOPT_AWS_SIGV4, awsSigV4Provider.c_str());
             }

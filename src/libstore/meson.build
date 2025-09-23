@@ -116,9 +116,6 @@ deps_other += boost
 curl = dependency('libcurl', 'curl')
 deps_private += curl
 
-# Check if curl supports AWS SigV4 (requires >= 7.75.0)
-curl_supports_aws_sigv4 = curl.version().version_compare('>= 7.75.0')
-
 # seccomp only makes sense on Linux
 is_linux = host_machine.system() == 'linux'
 seccomp_required = get_option('seccomp-sandboxing')
@@ -145,28 +142,46 @@ deps_public += nlohmann_json
 sqlite = dependency('sqlite3', 'sqlite', version : '>=3.6.19')
 deps_private += sqlite
 
-# AWS CRT C++ for lightweight credential management
-aws_crt_cpp = cxx.find_library('aws-crt-cpp', required : false)
+# S3 store support
+s3_store_opt = get_option('s3-store')
+aws_crt_support_available = false
 
-# Only enable AWS CRT support if both aws-crt-cpp AND curl >= 7.75.0 are available
-aws_crt_support_available = aws_crt_cpp.found() and curl_supports_aws_sigv4
+if not s3_store_opt.disabled()
+  # Check if curl supports AWS SigV4 (requires >= 7.75.0)
+  curl_supports_aws_sigv4 = curl.version().version_compare('>= 7.75.0')
 
-# Warn if aws-crt-cpp is available but S3 support disabled due to curl version
-if aws_crt_cpp.found() and not curl_supports_aws_sigv4
-  warning(
-    'AWS CRT C++ found but S3 support disabled: curl version @0@ is too old. S3 support requires curl >= 7.75.0 for AWS SigV4 authentication.'.format(
-      curl.version(),
-    ),
-  )
+  # AWS CRT C++ for lightweight credential management
+  aws_crt_cpp = cxx.find_library('aws-crt-cpp', required : s3_store_opt)
+
+  # Only enable AWS CRT support if both aws-crt-cpp AND curl >= 7.75.0 are available
+  aws_crt_support_available = aws_crt_cpp.found() and curl_supports_aws_sigv4
+
+  # Handle various error conditions
+  if s3_store_opt.enabled()
+    if not curl_supports_aws_sigv4
+      error('S3 store support requested but curl version @0@ is too old. S3 support requires curl >= 7.75.0 for AWS SigV4 authentication.'.format(curl.version()))
+    elif not aws_crt_cpp.found()
+      error('S3 store support requested but aws-crt-cpp library not found.')
+    endif
+  elif s3_store_opt.auto()
+    if aws_crt_cpp.found() and not curl_supports_aws_sigv4
+      warning(
+        'AWS CRT C++ found but S3 support disabled: curl version @0@ is too old. S3 support requires curl >= 7.75.0 for AWS SigV4 authentication.'.format(
+          curl.version(),
+        ),
+      )
+    endif
+  endif
+
+  if aws_crt_support_available
+    deps_other += aws_crt_cpp
+  endif
 endif
 
 configdata_pub.set(
   'NIX_WITH_S3_SUPPORT',
   aws_crt_support_available.to_int(),
 )
-if aws_crt_support_available
-  deps_other += aws_crt_cpp
-endif
 
 subdir('nix-meson-build-support/generate-header')
 

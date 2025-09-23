@@ -13,7 +13,7 @@ struct S3BinaryCacheStoreConfig : HttpBinaryCacheStoreConfig
 {
     using HttpBinaryCacheStoreConfig::HttpBinaryCacheStoreConfig;
 
-    S3BinaryCacheStoreConfig(std::string_view scheme, std::string_view cacheUri, const Store::Config::Params & params);
+    S3BinaryCacheStoreConfig(std::string_view uriScheme, std::string_view bucketName, const Params & params);
 
     const Setting<std::string> profile{
         this,
@@ -24,9 +24,15 @@ struct S3BinaryCacheStoreConfig : HttpBinaryCacheStoreConfig
           Nix uses the `default` profile.
         )"};
 
+protected:
+
+    constexpr static const char * defaultRegion = "us-east-1";
+
+public:
+
     const Setting<std::string> region{
         this,
-        "us-east-1",
+        defaultRegion,
         "region",
         R"(
           The region of the S3 bucket. If your bucket is not in

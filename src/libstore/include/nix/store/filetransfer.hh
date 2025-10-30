@@ -211,12 +211,9 @@ struct FileTransfer
 
     /**
      * Enqueue a data transfer request, returning a future to the result of
-     * the download. The future may throw a FileTransferError
-     * exception.
+     * the download. The future may throw a FileTransferError exception.
      */
-    virtual void enqueueFileTransfer(const FileTransferRequest & request, Callback<FileTransferResult> callback) = 0;
-
-    std::future<FileTransferResult> enqueueFileTransfer(const FileTransferRequest & request);
+    virtual std::future<FileTransferResult> enqueueFileTransfer(const FileTransferRequest & request) = 0;
 
     /**
      * Synchronously download a file.

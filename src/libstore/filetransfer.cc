@@ -4,7 +4,6 @@
 #include "nix/store/store-api.hh"
 #include "nix/util/compression.hh"
 #include "nix/util/finally.hh"
-#include "nix/util/callback.hh"
 #include "nix/util/signals.hh"
 
 #include "store-config-private.hh"
@@ -54,8 +53,7 @@ struct curlFileTransfer : public FileTransfer
         FileTransferRequest request;
         FileTransferResult result;
         Activity act;
-        bool done = false; // whether either the success or failure function has been called
-        Callback<FileTransferResult> callback;
+        std::shared_ptr<std::promise<FileTransferResult>> promise;
         CURL * req = 0;
         // buffer to accompany the `req` above
         char errbuf[CURL_ERROR_SIZE];
@@ -94,7 +92,7 @@ struct curlFileTransfer : public FileTransfer
         TransferItem(
             curlFileTransfer & fileTransfer,
             const FileTransferRequest & request,
-            Callback<FileTransferResult> && callback)
+            std::shared_ptr<std::promise<FileTransferResult>> promise)
             : fileTransfer(fileTransfer)
             , request(request)
             , act(*logger,
@@ -103,7 +101,7 @@ struct curlFileTransfer : public FileTransfer
                   fmt("%sing '%s'", request.verb(), request.uri),
                   {request.uri.to_string()},
                   request.parentAct)
-            , callback(std::move(callback))
+            , promise(std::move(promise))
             , finalSink([this](std::string_view data) {
                 if (errorSink) {
                     (*errorSink)(data);
@@ -143,25 +141,40 @@ struct curlFileTransfer : public FileTransfer
             }
             if (requestHeaders)
                 curl_slist_free_all(requestHeaders);
+        }
+
+        void completeSuccess(FileTransferResult && result) noexcept
+        {
+            if (!promise)
+                return;
+
             try {
-                if (!done)
-                    fail(FileTransferError(Interrupted, {}, "download of '%s' was interrupted", request.uri));
-            } catch (...) {
-                ignoreExceptionInDestructor();
+                promise->set_value(std::move(result));
+            } catch (const std::future_error &) {
+                debug("promise already completed for '%s'", request.uri);
             }
+
+            promise.reset();
         }
 
-        void failEx(std::exception_ptr ex)
+        void completeFailure(std::exception_ptr exc) noexcept
         {
-            assert(!done);
-            done = true;
-            callback.rethrow(ex);
+            if (!promise)
+                return;
+
+            try {
+                promise->set_exception(exc);
+            } catch (const std::future_error &) {
+                debug("promise already completed for '%s'", request.uri);
+            }
+
+            promise.reset();
         }
 
-        template<class T>
-        void fail(T && e)
+        template<typename E>
+        void completeFailure(E && exception) noexcept
         {
-            failEx(std::make_exception_ptr(std::forward<T>(e)));
+            completeFailure(std::make_exception_ptr(std::forward<E>(exception)));
         }
 
         LambdaSink finalSink;
@@ -453,6 +466,15 @@ struct curlFileTransfer : public FileTransfer
 
         void finish(CURLcode code)
         {
+            bool shouldComplete = true;
+
+            Finally ensureCompletion([&]() {
+                if (promise && shouldComplete) {
+                    completeFailure(
+                        FileTransferError(Interrupted, {}, "download of '%s' was interrupted", request.uri));
+                }
+            });
+
             auto finishTime = std::chrono::steady_clock::now();
 
             auto retryTimeMs = request.baseRetryTimeMs;
@@ -483,8 +505,10 @@ struct curlFileTransfer : public FileTransfer
                 httpStatus = 304;
             }
 
-            if (writeException)
-                failEx(writeException);
+            if (writeException) {
+                completeFailure(writeException);
+                return;
+            }
 
             else if (code == CURLE_OK && successfulStatuses.count(httpStatus)) {
                 result.cached = httpStatus == 304;
@@ -496,8 +520,8 @@ struct curlFileTransfer : public FileTransfer
                     result.etag = request.expectedETag;
 
                 act.progress(result.bodySize, result.bodySize);
-                done = true;
-                callback(std::move(result));
+                completeSuccess(std::move(result));
+                return;
             }
 
             else {
@@ -598,9 +622,16 @@ struct curlFileTransfer : public FileTransfer
                     decompressionSink.reset();
                     errorSink.reset();
                     embargo = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-                    fileTransfer.enqueueItem(shared_from_this());
-                } else
-                    fail(std::move(exc));
+                    try {
+                        fileTransfer.enqueueItem(shared_from_this());
+                        shouldComplete = false;
+                        return;
+                    } catch (...) {
+                        // Enqueue failed (e.g., during shutdown), fall through to failure
+                    }
+                }
+
+                completeFailure(std::move(exc));
             }
         }
     };
@@ -836,17 +867,21 @@ struct curlFileTransfer : public FileTransfer
 #endif
     }
 
-    void enqueueFileTransfer(const FileTransferRequest & request, Callback<FileTransferResult> callback) override
+    std::future<FileTransferResult> enqueueFileTransfer(const FileTransferRequest & request) override
     {
+        auto promise = std::make_shared<std::promise<FileTransferResult>>();
+        auto future = promise->get_future();
+
         /* Handle s3:// URIs by converting to HTTPS and optionally adding auth */
         if (request.uri.scheme() == "s3") {
             auto modifiedRequest = request;
             modifiedRequest.setupForS3();
-            enqueueItem(std::make_shared<TransferItem>(*this, std::move(modifiedRequest), std::move(callback)));
-            return;
+            enqueueItem(std::make_shared<TransferItem>(*this, std::move(modifiedRequest), promise));
+        } else {
+            enqueueItem(std::make_shared<TransferItem>(*this, request, promise));
         }
 
-        enqueueItem(std::make_shared<TransferItem>(*this, request, std::move(callback)));
+        return future;
     }
 };
 
@@ -900,18 +935,7 @@ void FileTransferRequest::setupForS3()
 #endif
 }
 
-std::future<FileTransferResult> FileTransfer::enqueueFileTransfer(const FileTransferRequest & request)
-{
-    auto promise = std::make_shared<std::promise<FileTransferResult>>();
-    enqueueFileTransfer(request, {[promise](std::future<FileTransferResult> fut) {
-                            try {
-                                promise->set_value(fut.get());
-                            } catch (...) {
-                                promise->set_exception(std::current_exception());
-                            }
-                        }});
-    return promise->get_future();
-}
+// enqueueFileTransfer is now pure virtual, implemented in derived classes
 
 FileTransferResult FileTransfer::download(const FileTransferRequest & request)
 {
@@ -982,20 +1006,31 @@ void FileTransfer::download(
         state->avail.notify_one();
     };
 
-    enqueueFileTransfer(
-        request, {[_state, resultCallback{std::move(resultCallback)}](std::future<FileTransferResult> fut) {
+    auto future = enqueueFileTransfer(request);
+
+    std::thread([future = std::move(future), _state, resultCallback{std::move(resultCallback)}]() mutable {
+        // Wait for transfer to complete WITHOUT holding the state lock
+        // (otherwise we'd deadlock with dataCallback which needs the lock)
+        std::exception_ptr exc;
+        std::optional<FileTransferResult> res;
+        try {
+            res = future.get();
+        } catch (...) {
+            exc = std::current_exception();
+        }
+
+        // Now update state and invoke callback
+        {
             auto state(_state->lock());
             state->quit = true;
-            try {
-                auto res = fut.get();
-                if (resultCallback)
-                    resultCallback(std::move(res));
-            } catch (...) {
-                state->exc = std::current_exception();
-            }
+            if (exc)
+                state->exc = exc;
+            else if (resultCallback && res)
+                resultCallback(std::move(*res));
             state->avail.notify_one();
             state->request.notify_one();
-        }});
+        }
+    }).detach();
 
     while (true) {
         checkInterrupt();

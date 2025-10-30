@@ -211,19 +211,22 @@ void HttpBinaryCacheStore::getFile(const std::string & path, Callback<std::optio
 
         auto request(makeRequest(path));
 
-        getFileTransfer()->enqueueFileTransfer(request, {[callbackPtr, this](std::future<FileTransferResult> result) {
-                                                   try {
-                                                       (*callbackPtr)(std::move(result.get().data));
-                                                   } catch (FileTransferError & e) {
-                                                       if (e.error == FileTransfer::NotFound
-                                                           || e.error == FileTransfer::Forbidden)
-                                                           return (*callbackPtr)({});
-                                                       maybeDisable();
-                                                       callbackPtr->rethrow();
-                                                   } catch (...) {
-                                                       callbackPtr->rethrow();
-                                                   }
-                                               }});
+        auto future = getFileTransfer()->enqueueFileTransfer(request);
+
+        // Handle result asynchronously - getFile() is explicitly async per the interface
+        std::thread([future = std::move(future), callbackPtr, this]() mutable {
+            try {
+                auto result = future.get();
+                (*callbackPtr)(std::move(result.data));
+            } catch (FileTransferError & e) {
+                if (e.error == FileTransfer::NotFound || e.error == FileTransfer::Forbidden)
+                    return (*callbackPtr)({});
+                maybeDisable();
+                callbackPtr->rethrow();
+            } catch (...) {
+                callbackPtr->rethrow();
+            }
+        }).detach();
 
     } catch (...) {
         callbackPtr->rethrow();

@@ -69,6 +69,36 @@ private:
         std::optional<std::string_view> contentEncoding);
 
     /**
+     * A Sink that manages a complete S3 multipart upload lifecycle.
+     * Creates the upload on construction, buffers and uploads chunks as data arrives,
+     * and completes or aborts the upload appropriately.
+     */
+    struct MultipartSink : Sink
+    {
+        S3BinaryCacheStore & store;
+        std::string path;
+        std::string uploadId;
+        uint64_t chunkSize;
+
+        std::vector<std::string> partEtags;
+        std::string buffer;
+        bool completed = false;
+
+        MultipartSink(
+            S3BinaryCacheStore & store,
+            std::string_view path,
+            uint64_t sizeHint,
+            std::string_view mimeType,
+            std::optional<std::string_view> contentEncoding);
+
+        ~MultipartSink();
+
+        void operator()(std::string_view data) override;
+        void finish();
+        void uploadChunk(std::string chunk);
+    };
+
+    /**
      * Creates a multipart upload for large objects to S3.
      *
      * @see
@@ -86,18 +116,13 @@ private:
      */
     std::string uploadPart(std::string_view key, std::string_view uploadId, uint64_t partNumber, std::string data);
 
-    struct UploadedPart
-    {
-        uint64_t partNumber;
-        std::string etag;
-    };
-
     /**
      * Completes a multipart upload by combining all uploaded parts.
      * @see
      * https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html#API_CompleteMultipartUpload_RequestSyntax
      */
-    void completeMultipartUpload(std::string_view key, std::string_view uploadId, std::span<const UploadedPart> parts);
+    void
+    completeMultipartUpload(std::string_view key, std::string_view uploadId, std::span<const std::string> partEtags);
 
     /**
      * Abort a multipart upload
@@ -158,7 +183,22 @@ void S3BinaryCacheStore::uploadMultipart(
     std::optional<std::string_view> contentEncoding)
 {
     debug("using S3 multipart upload for '%s' (%d bytes)", path, sizeHint);
-    uint64_t chunkSize = s3Config->multipartChunkSize;
+    MultipartSink sink(*this, path, sizeHint, mimeType, contentEncoding);
+    source.drainInto(sink);
+    sink.finish();
+}
+
+S3BinaryCacheStore::MultipartSink::MultipartSink(
+    S3BinaryCacheStore & store,
+    std::string_view path,
+    uint64_t sizeHint,
+    std::string_view mimeType,
+    std::optional<std::string_view> contentEncoding)
+    : store(store)
+    , path(path)
+{
+    // Calculate chunk size and estimated parts
+    chunkSize = store.s3Config->multipartChunkSize;
     uint64_t estimatedParts = (sizeHint + chunkSize - 1) / chunkSize; // ceil division
 
     if (estimatedParts > AWS_MAX_PART_COUNT) {
@@ -178,7 +218,7 @@ void S3BinaryCacheStore::uploadMultipart(
         warn(
             "adjusting S3 multipart chunk size from %s to %s "
             "to stay within %d part limit for %s file",
-            renderSize(s3Config->multipartChunkSize.get()),
+            renderSize(store.s3Config->multipartChunkSize.get()),
             renderSize(minChunkSize),
             AWS_MAX_PART_COUNT,
             renderSize(sizeHint));
@@ -187,49 +227,52 @@ void S3BinaryCacheStore::uploadMultipart(
         estimatedParts = AWS_MAX_PART_COUNT;
     }
 
-    auto uploadId = createMultipartUpload(path, mimeType, contentEncoding);
+    buffer.reserve(chunkSize);
+    partEtags.reserve(estimatedParts);
+    uploadId = store.createMultipartUpload(path, mimeType, contentEncoding);
+}
 
-    try {
-        std::vector<UploadedPart> parts;
-        parts.reserve(estimatedParts);
-
-        uint64_t partNumber = 1;
-
-        while (true) {
-            std::string chunk(chunkSize, '\0');
-            auto bytesRead = source.read(chunk.data(), chunkSize);
-
-            if (bytesRead == 0)
-                break;
-
-            chunk.resize(bytesRead);
-
-            std::string etag = uploadPart(path, uploadId, partNumber, std::move(chunk));
-            debug("Part %d uploaded, ETag: %s", partNumber, etag);
-            parts.push_back(UploadedPart{.partNumber = partNumber, .etag = std::move(etag)});
-
-            partNumber++;
-
-            if (partNumber > AWS_MAX_PART_COUNT) {
-                throw Error("S3 multipart upload exceeded %d part limit", AWS_MAX_PART_COUNT);
-            }
-        }
-
-        if (parts.empty()) {
-            throw Error("S3 multipart upload failed: no data read from stream");
-        }
-
-        completeMultipartUpload(path, uploadId, parts);
-
-        debug("S3 multipart upload completed: %d parts uploaded for '%s'", parts.size(), path);
-    } catch (...) {
+S3BinaryCacheStore::MultipartSink::~MultipartSink()
+{
+    if (!completed) {
         try {
-            abortMultipartUpload(path, uploadId);
+            store.abortMultipartUpload(path, uploadId);
         } catch (std::exception & e) {
             printError("failed to abort S3 multipart upload '%s': %s", uploadId, e.what());
         }
-        throw;
     }
+}
+
+void S3BinaryCacheStore::MultipartSink::operator()(std::string_view data)
+{
+    buffer.append(data);
+
+    while (buffer.size() >= chunkSize) {
+        uploadChunk(buffer.substr(0, chunkSize));
+        buffer.erase(0, chunkSize);
+    }
+}
+
+void S3BinaryCacheStore::MultipartSink::finish()
+{
+    if (!buffer.empty()) {
+        uploadChunk(std::move(buffer));
+        buffer.clear();
+    }
+
+    if (partEtags.empty()) {
+        throw Error("S3 multipart upload failed: no data read from stream");
+    }
+
+    store.completeMultipartUpload(path, uploadId, partEtags);
+    completed = true;
+}
+
+void S3BinaryCacheStore::MultipartSink::uploadChunk(std::string chunk)
+{
+    auto partNumber = partEtags.size() + 1;
+    std::string etag = store.uploadPart(path, uploadId, partNumber, std::move(chunk));
+    partEtags.push_back(std::move(etag));
 }
 
 std::string S3BinaryCacheStore::createMultipartUpload(
@@ -269,6 +312,10 @@ std::string S3BinaryCacheStore::createMultipartUpload(
 std::string
 S3BinaryCacheStore::uploadPart(std::string_view key, std::string_view uploadId, uint64_t partNumber, std::string data)
 {
+    if (partNumber > AWS_MAX_PART_COUNT) {
+        throw Error("S3 multipart upload exceeded %d part limit", AWS_MAX_PART_COUNT);
+    }
+
     auto req = makeRequest(key);
     req.method = HttpMethod::PUT;
     req.setupForS3();
@@ -287,6 +334,7 @@ S3BinaryCacheStore::uploadPart(std::string_view key, std::string_view uploadId, 
         throw Error("S3 UploadPart response missing ETag for part %d", partNumber);
     }
 
+    debug("Part %d uploaded, ETag: %s", partNumber, result.etag);
     return std::move(result.etag);
 }
 
@@ -304,7 +352,7 @@ void S3BinaryCacheStore::abortMultipartUpload(std::string_view key, std::string_
 }
 
 void S3BinaryCacheStore::completeMultipartUpload(
-    std::string_view key, std::string_view uploadId, std::span<const UploadedPart> parts)
+    std::string_view key, std::string_view uploadId, std::span<const std::string> partEtags)
 {
     auto req = makeRequest(key);
     req.setupForS3();
@@ -315,21 +363,24 @@ void S3BinaryCacheStore::completeMultipartUpload(
     req.method = HttpMethod::POST;
 
     std::string xml = "<CompleteMultipartUpload>";
-    for (const auto & part : parts) {
+    for (const auto & [idx, etag] : enumerate(partEtags)) {
         xml += "<Part>";
-        xml += "<PartNumber>" + std::to_string(part.partNumber) + "</PartNumber>";
-        xml += "<ETag>" + part.etag + "</ETag>";
+        // S3 part numbers are 1-indexed, but vector indices are 0-indexed
+        xml += "<PartNumber>" + std::to_string(idx + 1) + "</PartNumber>";
+        xml += "<ETag>" + etag + "</ETag>";
         xml += "</Part>";
     }
     xml += "</CompleteMultipartUpload>";
 
-    debug("S3 CompleteMultipartUpload XML (%d parts): %s", parts.size(), xml);
+    debug("S3 CompleteMultipartUpload XML (%d parts): %s", partEtags.size(), xml);
 
     StringSource payload{xml};
     req.data = {payload};
     req.mimeType = "text/xml";
 
     getFileTransfer()->enqueueFileTransfer(req).get();
+
+    debug("S3 multipart upload completed: %d parts uploaded for '%s'", partEtags.size(), key);
 }
 
 StringSet S3BinaryCacheStoreConfig::uriSchemes()

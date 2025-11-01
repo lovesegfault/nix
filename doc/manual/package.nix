@@ -63,7 +63,12 @@ mkMesonDerivation (finalAttrs: {
     jq
     python3
     rsync
-    json-schema-for-humans
+    (json-schema-for-humans.overrideAttrs (old: {
+      disabledTests = old.disabledTests ++ [
+        "test_config_parameters_with_nonexistent_output_path"
+        "test_nonexistent_output_path"
+      ];
+    }))
     changelog-d
   ]
   ++ lib.optionals (!officialRelease) [

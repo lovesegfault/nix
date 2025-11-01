@@ -59,13 +59,16 @@ scope: {
 
   # TODO Hack until https://github.com/NixOS/nixpkgs/issues/45462 is fixed.
   boost =
-    (pkgs.boost.override {
+    (pkgs.boost189.override {
       extraB2Args = [
+        "cxxstd=23"
         "--with-container"
         "--with-context"
         "--with-coroutine"
         "--with-iostreams"
         "--with-url"
+        "--with-cobalt"
+        "--with-asio"
       ];
       enableIcu = false;
     }).overrideAttrs

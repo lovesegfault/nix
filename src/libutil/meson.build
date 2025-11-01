@@ -61,6 +61,7 @@ boost = dependency(
     'context',
     'coroutine',
     'iostreams',
+    'system',
     'url',
   ],
   include_type : 'system',

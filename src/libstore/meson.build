@@ -103,9 +103,12 @@ boost = dependency(
   'boost',
   modules : [
     'container',
+    'context',
+    'system',
     # Shouldn't list, because can header-only, and Meson currently looks for libs
     #'regex',
     'url',
+    'cobalt',
   ],
   include_type : 'system',
 )
@@ -284,6 +287,7 @@ sources = files(
   'downstream-placeholder.cc',
   'dummy-store.cc',
   'export-import.cc',
+  'filetransfer-cobalt.cc',
   'filetransfer.cc',
   'gc.cc',
   'globals.cc',

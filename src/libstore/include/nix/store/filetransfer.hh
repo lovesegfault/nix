@@ -77,6 +77,16 @@ struct FileTransferSettings : Config
           not processed quickly enough to exceed the size of this buffer, downloads may stall.
           The default is 67108864 (64 MiB).
         )"};
+
+    Setting<bool> useCobaltImplementation{
+        this,
+        true,
+        "use-cobalt-filetransfer",
+        R"(
+          Use the experimental Boost.Cobalt-based file transfer implementation.
+          This replaces the callback-based implementation with C++20 coroutines
+          for better performance and code clarity. (experimental)
+        )"};
 };
 
 extern FileTransferSettings fileTransferSettings;

@@ -1,4 +1,5 @@
 #include "nix/store/filetransfer.hh"
+#include "nix/store/filetransfer-cobalt.hh"
 #include "nix/store/globals.hh"
 #include "nix/util/config-global.hh"
 #include "nix/store/store-api.hh"
@@ -866,16 +867,30 @@ ref<curlFileTransfer> makeCurlFileTransfer()
 
 ref<FileTransfer> getFileTransfer()
 {
-    static ref<curlFileTransfer> fileTransfer = makeCurlFileTransfer();
+    static ref<FileTransfer> fileTransfer = makeFileTransfer();
 
-    if (fileTransfer->state_.lock()->isQuitting())
-        fileTransfer = makeCurlFileTransfer();
+    // Check if we need to recreate (for either implementation)
+    bool needRecreate = false;
+
+    if (auto oldImpl = fileTransfer.dynamic_pointer_cast<curlFileTransfer>()) {
+        if (oldImpl->state_.lock()->isQuitting()) {
+            needRecreate = true;
+        }
+    }
+    // CobaltFileTransfer doesn't have a quitting state yet, will add if needed
+
+    if (needRecreate) {
+        fileTransfer = makeFileTransfer();
+    }
 
     return fileTransfer;
 }
 
 ref<FileTransfer> makeFileTransfer()
 {
+    if (fileTransferSettings.useCobaltImplementation) {
+        return make_ref<CobaltFileTransfer>();
+    }
     return makeCurlFileTransfer();
 }
 

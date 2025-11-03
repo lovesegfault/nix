@@ -308,6 +308,7 @@ sources = files(
   'parsed-derivations.cc',
   'path-info.cc',
   'path-references.cc',
+  'path-tree.cc',
   'path-with-outputs.cc',
   'path.cc',
   'pathlocks.cc',

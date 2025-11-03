@@ -1493,13 +1493,8 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
             overloaded{
                 /* Since we'll use the already installed versions of these, we
                    can treat them as leaves and ignore any references they have. */
-                [&](const AlreadyRegistered &) {
-                    outputGraph[scratchOutputs.at(name)] = StorePathSet{};
-                },
-                [&](const PerhapsNeedToRegister & refs) {
-                    outputGraph[scratchOutputs.at(name)] = refs.refs;
-                }
-            },
+                [&](const AlreadyRegistered &) { outputGraph[scratchOutputs.at(name)] = StorePathSet{}; },
+                [&](const PerhapsNeedToRegister & refs) { outputGraph[scratchOutputs.at(name)] = refs.refs; }},
             *orifu);
     }
 

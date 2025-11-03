@@ -63,6 +63,7 @@ headers = [ config_pub_h ] + files(
   'path-info.hh',
   'path-references.hh',
   'path-regex.hh',
+  'path-tree.hh',
   'path-with-outputs.hh',
   'path.hh',
   'pathlocks.hh',

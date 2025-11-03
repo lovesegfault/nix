@@ -180,6 +180,13 @@ struct DerivationBuilder : RestrictionContext
      * killed.
      */
     virtual bool killChild() = 0;
+
+    /**
+     * Get the chroot root directory, if this build uses a chroot.
+     * Used for accessing build outputs before they're registered to the store.
+     * Returns std::nullopt if this build doesn't use a chroot.
+     */
+    virtual std::optional<Path> getChrootRootDir() { return std::nullopt; }
 };
 
 struct ExternalBuilder

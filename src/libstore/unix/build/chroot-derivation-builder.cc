@@ -52,6 +52,13 @@ struct ChrootDerivationBuilder : virtual DerivationBuilderImpl
         return buildUser->getGID();
     }
 
+    std::optional<Path> getChrootRootDir() override
+    {
+        if (chrootRootDir.empty())
+            return std::nullopt;
+        return chrootRootDir;
+    }
+
     void prepareSandbox() override
     {
         /* Create a temporary directory in which we set up the chroot

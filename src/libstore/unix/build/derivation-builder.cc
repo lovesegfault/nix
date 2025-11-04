@@ -4,6 +4,7 @@
 #include "nix/util/processes.hh"
 #include "nix/store/builtins.hh"
 #include "nix/store/path-references.hh"
+#include "nix/store/path-tree.hh"
 #include "nix/util/finally.hh"
 #include "nix/util/util.hh"
 #include "nix/util/archive.hh"
@@ -1512,13 +1513,40 @@ SingleDrvOutputs DerivationBuilderImpl::registerOutputs()
     auto sortedOutputNames = std::visit(
         overloaded{
             [&](Cycle<std::string> & cycle) -> std::vector<std::string> {
-                // TODO with more -vvvv also show the temporary paths for manual inspection.
+                // Generate detailed cycle visualization
+                std::optional<ref<SourceAccessor>> accessor = std::nullopt;
+                std::string treeStr;
+
+                try {
+                    // Try to create accessor for chroot to show file-level details
+                    if (auto chrootDir = getChrootRootDir()) {
+                        // Use PosixSourceAccessor rooted at chroot to access unregistered outputs
+                        // scanForReferencesDeep will use this to find which files contain references
+                        accessor = make_ref<PosixSourceAccessor>(std::filesystem::path(*chrootDir));
+                    }
+
+                    treeStr = genGraphString(
+                        scratchOutputs.at(cycle.parent), // from (parent in cycle)
+                        scratchOutputs.at(cycle.path),   // to (path that closes cycle)
+                        outputGraph,                     // graph data
+                        store,
+                        true,                 // show all paths
+                        accessor.has_value(), // precise mode if accessor available (shows files)
+                        accessor);
+                } catch (std::exception & e) {
+                    // If tree generation fails, fall back to simple message with reason
+                    treeStr = fmt("(unable to generate detailed cycle information: %s)", e.what());
+                }
+
                 throw BuildError(
                     BuildResult::Failure::OutputRejected,
-                    "cycle detected in build of '%s' in the references of output '%s' from output '%s'",
+                    "cycle detected in build of '%s' in the references of output '%s' from output '%s'.\n\n"
+                    "Shown below %s inside the outputs leading to the cycle:\n%s",
                     store.printStorePath(drvPath),
                     cycle.path,
-                    cycle.parent);
+                    cycle.parent,
+                    accessor.has_value() ? "are the files" : "are the store paths",
+                    treeStr);
             },
             [](auto & sorted) { return sorted; }},
         topoSortResult);

@@ -5,6 +5,7 @@
 
   boost,
   brotli,
+  capnproto,
   libarchive,
   libblake3,
   libcpuid,
@@ -57,6 +58,7 @@ mkMesonLibrary (finalAttrs: {
 
   propagatedBuildInputs = [
     boost
+    capnproto # Provides kj-async for stackless coroutines
     libarchive
     nlohmann_json
   ];

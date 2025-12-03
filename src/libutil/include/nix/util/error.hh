@@ -22,7 +22,9 @@
 #include <list>
 #include <memory>
 #include <optional>
+#include <source_location>
 #include <utility>
+#include <vector>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -75,12 +77,38 @@ struct Trace
 
 inline std::strong_ordering operator<=>(const Trace & lhs, const Trace & rhs);
 
+/**
+ * A frame in an async stack trace.
+ *
+ * This captures the source location and optional description for
+ * each suspension point in an async call chain, enabling meaningful
+ * stack traces for coroutine-based code.
+ */
+struct AsyncTraceFrame
+{
+    std::source_location location;
+    std::optional<std::string> description;
+
+    AsyncTraceFrame(std::source_location loc, std::optional<std::string> desc = std::nullopt)
+        : location(loc)
+        , description(std::move(desc))
+    {
+    }
+};
+
 struct ErrorInfo
 {
     Verbosity level;
     HintFmt msg;
     std::shared_ptr<const Pos> pos;
     std::list<Trace> traces;
+
+    /**
+     * Async trace frames for coroutine-based code.
+     * These track the async call chain at suspension points.
+     */
+    std::vector<AsyncTraceFrame> asyncTraces;
+
     /**
      * Some messages are generated directly by expressions; notably `builtins.warn`, `abort`, `throw`.
      * These may be rendered differently, so that users can distinguish them.
@@ -223,6 +251,25 @@ public:
     {
         return err;
     };
+
+    /**
+     * Add an async trace frame to track the async call chain.
+     *
+     * @param loc Source location of the suspension point
+     * @param description Optional context description
+     */
+    void addAsyncTrace(std::source_location loc, std::optional<std::string> description = std::nullopt)
+    {
+        err.asyncTraces.emplace_back(loc, std::move(description));
+    }
+
+    /**
+     * Check if there are any async trace frames.
+     */
+    bool hasAsyncTrace() const
+    {
+        return !err.asyncTraces.empty();
+    }
 };
 
 #define MakeError(newClass, superClass) \

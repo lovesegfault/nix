@@ -16,6 +16,9 @@ in
 scope: {
   inherit stdenv;
 
+  # Cap'n Proto provides kj-async for stackless coroutines
+  inherit (pkgs) capnproto;
+
   boehmgc =
     (pkgs.boehmgc.override {
       enableLargeConfig = true;

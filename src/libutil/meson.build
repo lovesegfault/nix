@@ -110,6 +110,10 @@ deps_private += cpuid
 nlohmann_json = dependency('nlohmann_json', version : '>= 3.9')
 deps_public += nlohmann_json
 
+# kj-async for stackless coroutines (from Cap'n Proto)
+kj_async = dependency('kj-async', required : true, include_type : 'system')
+deps_public += kj_async
+
 cxx = meson.get_compiler('cpp')
 
 config_priv_h = configure_file(
@@ -122,6 +126,7 @@ subdir('nix-meson-build-support/common')
 sources = [ config_priv_h ] + files(
   'archive.cc',
   'args.cc',
+  'async-io.cc',
   'base-n.cc',
   'base-nix-32.cc',
   'canon-path.cc',
